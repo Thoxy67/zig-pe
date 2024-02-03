@@ -55,26 +55,25 @@ pub fn get_image_size(buffer: []u8) !usize {
 }
 
 /// Function to get the DOS header
-pub fn get_dos_header(lp_image: win.LPVOID) *win.IMAGE_DOS_HEADER {
+pub fn get_dos_header(lp_image: ?*anyopaque) *win.IMAGE_DOS_HEADER {
     return @ptrCast(@constCast(&lp_image));
 }
 
 /// Function to get the NT header
-pub fn get_nt_header64(lp_image: win.LPVOID, lp_dos_header: *win.IMAGE_DOS_HEADER) *win.IMAGE_NT_HEADERS {
+pub fn get_nt_header64(lp_image: ?*anyopaque, lp_dos_header: *win.IMAGE_DOS_HEADER) *win.IMAGE_NT_HEADERS {
     const e_lfanew: usize = @intCast(lp_dos_header.*.e_lfanew);
     const lp_image_ptr = @intFromPtr(lp_image) + e_lfanew;
     return @as(*win.IMAGE_NT_HEADERS, @ptrFromInt(lp_image_ptr));
 }
 
 /// Writes each section of the PE file to the allocated memory in the target process.
-pub fn write_sections(baseptr: win.LPVOID, buffer: []u8, dos_header: *win.IMAGE_DOS_HEADER, nt_header: *win.IMAGE_NT_HEADERS) void {
+pub fn write_sections(baseptr: ?*anyopaque, buffer: []u8, dos_header: *win.IMAGE_DOS_HEADER, nt_header: *win.IMAGE_NT_HEADERS) void {
     std.log.debug("Write IMAGE_SECTION_HEADER", .{});
     for (0..nt_header.FileHeader.NumberOfSections) |count| {
         const nt_section_header: *win.IMAGE_SECTION_HEADER = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(dos_header.e_lfanew)) + @sizeOf(win.IMAGE_NT_HEADERS) + (count * 40));
         std.log.debug("{s},  {x}", .{ nt_section_header.Name, nt_section_header.PointerToRawData });
         const section_data = buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.PointerToRawData + nt_section_header.SizeOfRawData)];
-        const VirtualAddress: usize = @intCast(nt_section_header.VirtualAddress);
-        const a: [*]u8 = @ptrFromInt(@intFromPtr(baseptr) + VirtualAddress);
-        @memcpy(a, section_data);
+        const VirtualAddress: [*]u8 = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(nt_section_header.VirtualAddress)));
+        @memcpy(VirtualAddress, section_data);
     }
 }

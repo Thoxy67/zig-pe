@@ -34,6 +34,37 @@ pub fn main() !void {
     //std.debug.print("{any} \n", .{lp_nt_header});
 
     pe.write_sections(addr, file_content, dosheader, lp_nt_header);
+    write_import_table(addr, lp_nt_header);
+}
+
+// TODO : Need to fix
+fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS) void {
+    const import_dir = nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (import_dir.Size == 0) {
+        return;
+    }
+
+    const ogfirstthunkptr: *win.IMAGE_IMPORT_DESCRIPTOR = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(import_dir.VirtualAddress)));
+    while (ogfirstthunkptr.Name != 0 and ogfirstthunkptr.FirstThunk != 0) {
+        const ptr: usize = @intFromPtr(baseptr) + (ogfirstthunkptr.Name - 6);
+
+        std.debug.print("{}", .{ogfirstthunkptr.Name});
+
+        const dllname = read_string_from_memory(@ptrCast(@as([*]u8, @ptrFromInt(ptr))));
+        std.debug.print("{s} \n", .{dllname});
+        break;
+    }
+}
+
+fn read_string_from_memory(baseptr: [*]u8) []u8 {
+    var temp: [win.MAX_PATH]u8 = undefined;
+    for (0..win.MAX_PATH) |i| {
+        temp[i] = baseptr[i];
+        if (temp[i] == 0) {
+            break;
+        }
+    }
+    return &temp;
 }
 
 test "simple test" {}
