@@ -12,6 +12,7 @@ pub fn main() !void {
         std.debug.print("cannot get header size\n", .{});
         return;
     };
+    const header = file_content[0..header_size];
 
     const image_size = pe.get_image_size(file_content) catch {
         std.debug.print("cannot get image size\n", .{});
@@ -22,19 +23,9 @@ pub fn main() !void {
         std.debug.print("cannot alloc virtual memory\n", .{});
         return;
     };
+    const addr_array_ptr: [*]u8 = @ptrFromInt(@intFromPtr(addr));
 
-    const pHandle = win.OpenProcess(win.PROCESS_ALL_ACCESS, std.os.windows.FALSE, win.GetCurrentProcessId());
-    if (pHandle == null) {
-        std.debug.print("cannot open current process\n", .{});
-        return;
-    }
-
-    var _bytesWritten: win.SIZE_T = undefined;
-    const header = file_content[0..header_size];
-    if (win.WriteProcessMemory(pHandle, addr, @ptrCast(header.ptr), header.len, &_bytesWritten) == win.FALSE) {
-        std.debug.print("cannot write to process memory\n", .{});
-        return;
-    }
+    @memcpy(addr_array_ptr, header);
 
     const dosheader: *win.IMAGE_DOS_HEADER = @ptrCast(@alignCast(addr));
 
@@ -60,7 +51,8 @@ fn write_sections(baseptr: win.LPVOID, buffer: []u8, dos_header: *win.IMAGE_DOS_
     std.debug.print("{s} \n", .{nt_section_header.Name});
 
     for (0..number_of_sections) |n| {
-        const section_data = buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER) * n))..(nt_section_header.PointerToRawData + nt_section_header.SizeOfRawData)];
+        _ = n; // autofix
+        const section_data = buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.PointerToRawData + nt_section_header.SizeOfRawData)];
 
         const VirtualAddress: usize = @intCast(nt_section_header.VirtualAddress);
 
@@ -68,8 +60,9 @@ fn write_sections(baseptr: win.LPVOID, buffer: []u8, dos_header: *win.IMAGE_DOS_
         @memcpy(a, section_data);
 
         const b: *win.IMAGE_SECTION_HEADER = @ptrCast(@alignCast(a));
+        _ = b; // autofix
 
-        std.debug.print("{} = {s} \n", .{ n, b.Name });
+        // nt_section_header = b;
     }
 
     //std.log.debug("{s}\n", nt_section_header.Name);
