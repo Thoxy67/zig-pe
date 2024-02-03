@@ -28,44 +28,12 @@ pub fn main() !void {
     @memcpy(addr_array_ptr, header);
 
     const dosheader: *win.IMAGE_DOS_HEADER = @ptrCast(@alignCast(addr));
-
     //std.debug.print("{any} \n", .{dosheader});
 
     const lp_nt_header = pe.get_nt_header64(addr, dosheader);
-
     //std.debug.print("{any} \n", .{lp_nt_header});
 
-    write_sections(addr, file_content, dosheader, lp_nt_header);
-
-    //std.debug.print("{any} \n", .{lp_nt_header});
-
-}
-
-fn write_sections(baseptr: win.LPVOID, buffer: []u8, dos_header: *win.IMAGE_DOS_HEADER, nt_header: *win.IMAGE_NT_HEADERS) void {
-    const number_of_sections = nt_header.FileHeader.NumberOfSections;
-
-    const e_lfanew: usize = @intCast(dos_header.e_lfanew);
-
-    const nt_section_header: *win.IMAGE_SECTION_HEADER = @ptrFromInt(@intFromPtr(baseptr) + e_lfanew + @sizeOf(win.IMAGE_NT_HEADERS));
-
-    std.debug.print("{s} \n", .{nt_section_header.Name});
-
-    for (0..number_of_sections) |n| {
-        _ = n; // autofix
-        const section_data = buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.PointerToRawData + nt_section_header.SizeOfRawData)];
-
-        const VirtualAddress: usize = @intCast(nt_section_header.VirtualAddress);
-
-        const a: [*]u8 = @ptrFromInt(@intFromPtr(baseptr) + VirtualAddress);
-        @memcpy(a, section_data);
-
-        const b: *win.IMAGE_SECTION_HEADER = @ptrCast(@alignCast(a));
-        _ = b; // autofix
-
-        // nt_section_header = b;
-    }
-
-    //std.log.debug("{s}\n", nt_section_header.Name);
+    pe.write_sections(addr, file_content, dosheader, lp_nt_header);
 }
 
 test "simple test" {}

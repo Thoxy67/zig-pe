@@ -22,7 +22,7 @@ pub fn get_headers_size(buffer: []u8) !usize {
                 const bit_version: u16 = std.mem.readVarInt(u16, buffer[offset + 4 + 20 .. offset + 4 + 20 + 2], std.builtin.Endian.little);
                 if (bit_version == 523 or bit_version == 267) {
                     const header_size: u32 = std.mem.readVarInt(u32, buffer[offset + 24 + 60 .. offset + 24 + 60 + 4], std.builtin.Endian.little);
-                    std.log.debug("dos_header_size\t= \t0x{x}, {}", .{ header_size, header_size });
+                    std.log.debug("dos_header_size\t= 0x{x}", .{header_size});
                     return @intCast(header_size);
                 } else {
                     return error.invalidBitVersion;
@@ -47,7 +47,7 @@ pub fn get_image_size(buffer: []u8) !usize {
     const bit_version: u32 = std.mem.readVarInt(u32, buffer[(offset + 4 + 20)..(offset + 4 + 20 + 2)], std.builtin.Endian.little);
     if (bit_version == 523 or bit_version == 267) {
         const size: u32 = std.mem.readVarInt(u32, buffer[(offset + 24 + 60 - 4)..((offset + 24 + 60 - 4) + 4)], std.builtin.Endian.little);
-        std.log.debug("dos_image_size \t= \t0x{x}, {}", .{ size, size });
+        std.log.debug("dos_image_size \t= 0x{x}", .{size});
         return @intCast(size);
     } else {
         return error.invalidBitVersion;
@@ -64,4 +64,17 @@ pub fn get_nt_header64(lp_image: win.LPVOID, lp_dos_header: *win.IMAGE_DOS_HEADE
     const e_lfanew: usize = @intCast(lp_dos_header.*.e_lfanew);
     const lp_image_ptr = @intFromPtr(lp_image) + e_lfanew;
     return @as(*win.IMAGE_NT_HEADERS, @ptrFromInt(lp_image_ptr));
+}
+
+/// Writes each section of the PE file to the allocated memory in the target process.
+pub fn write_sections(baseptr: win.LPVOID, buffer: []u8, dos_header: *win.IMAGE_DOS_HEADER, nt_header: *win.IMAGE_NT_HEADERS) void {
+    std.log.debug("Write IMAGE_SECTION_HEADER", .{});
+    for (0..nt_header.FileHeader.NumberOfSections) |count| {
+        const nt_section_header: *win.IMAGE_SECTION_HEADER = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(dos_header.e_lfanew)) + @sizeOf(win.IMAGE_NT_HEADERS) + (count * 40));
+        std.log.debug("{s},  {x}", .{ nt_section_header.Name, nt_section_header.PointerToRawData });
+        const section_data = buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.PointerToRawData + nt_section_header.SizeOfRawData)];
+        const VirtualAddress: usize = @intCast(nt_section_header.VirtualAddress);
+        const a: [*]u8 = @ptrFromInt(@intFromPtr(baseptr) + VirtualAddress);
+        @memcpy(a, section_data);
+    }
 }
