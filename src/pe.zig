@@ -75,3 +75,78 @@ pub fn write_sections(baseptr: ?*anyopaque, buffer: []u8, dos_header: *win.IMAGE
         @memcpy(@as([*]u8, @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(nt_section_header.*.VirtualAddress)))), buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.*.PointerToRawData + nt_section_header.*.SizeOfRawData)]);
     }
 }
+
+/// Writes the import table of the PE file to the allocated memory in the target process.
+pub fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS) void {
+    std.log.debug("\x1b[0;1m[-] === Get Write Import Table ===\x1b[0m", .{});
+    const import_dir = nt_header.*.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (import_dir.Size == 0) {
+        return;
+    }
+    var importDescriptorPtr: *win.IMAGE_IMPORT_DESCRIPTOR =
+        @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(import_dir.VirtualAddress)) - 40);
+
+    var i: usize = 0;
+
+    while (importDescriptorPtr.Name != 0 and importDescriptorPtr.FirstThunk != 0) {
+        const dllNamePtr: [*]u8 =
+            @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.Name)) - 40);
+
+        const dllName = read_string_from_memory(dllNamePtr);
+
+        std.log.debug("dll : \x1b[34m{s}\x1b[0m\tfirst_thunk : \x1b[31m0x{x}\x1b[0m\tname_offset: \x1b[32m0x{x}\x1b[0m", .{
+            std.mem.span(dllName),
+            importDescriptorPtr.FirstThunk,
+            importDescriptorPtr.Name - 40,
+        });
+
+        // const a: []u8 = (std.mem.span(dllName) ++ 0x0);
+
+        const dll_handle: win.HMODULE = win.LoadLibraryA(read_string_from_memory(dllNamePtr));
+        if (dll_handle == null) {
+            std.log.err("{s} not found", .{dllName});
+            return;
+        }
+        var thunkptr: usize = @intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.unnamed_0.Characteristics)) - 40;
+
+        while (true) {
+            const thunk: [*]u8 = @ptrFromInt(thunkptr);
+            const offset: usize = std.mem.readVarInt(usize, thunk[0..@sizeOf(usize)], std.builtin.Endian.little);
+
+            if (offset == 0) {
+                break;
+            }
+
+            const funcname = read_string_from_memory(@ptrFromInt(@intFromPtr(baseptr) - 40 + offset + 2));
+            std.log.debug("function : \x1b[33m{s}\x1b[0m", .{std.mem.span(funcname)});
+
+            const funcaddress: win.FARPROC = win.GetProcAddress(dll_handle, read_string_from_memory(@ptrFromInt(@intFromPtr(baseptr) - 40 + offset + 2)));
+            if (funcaddress == null) {
+                std.log.err("{s} not found", .{funcname});
+                return;
+            }
+
+            const funcaddress_ptr: *usize = @ptrFromInt(@intFromPtr(baseptr) - 40 + @as(usize, @intCast(importDescriptorPtr.FirstThunk)) + i * @sizeOf(usize));
+
+            funcaddress_ptr.* = @intCast(@intFromPtr(funcaddress));
+
+            i += 1;
+            thunkptr += @sizeOf(usize);
+        }
+
+        // Move to the next import descriptor
+        importDescriptorPtr = @ptrFromInt(@intFromPtr(importDescriptorPtr) + @sizeOf(win.IMAGE_IMPORT_DESCRIPTOR));
+    }
+}
+
+/// Reads a string from memory.
+fn read_string_from_memory(baseptr: [*]u8) [*:0]const u8 {
+    var temp: [100]u8 = undefined;
+    for (0..100) |i| {
+        temp[i] = baseptr[i];
+        if (temp[i] == 0) {
+            break;
+        }
+    }
+    return temp[0..temp.len :0];
+}
