@@ -57,14 +57,19 @@ fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS) vo
 
         const dllName = read_string_from_memory(dllNamePtr);
 
-        std.log.debug("DLL : \x1b[34m{s}\x1b[0m\tFirstThunk : \x1b[31m0x{x}\x1b[0m\tName offset: \x1b[32m0x{x}\x1b[0m", .{
-            dllName,
+        std.log.debug("dll : \x1b[34m{s}\x1b[0m\tfirst_thunk : \x1b[31m0x{x}\x1b[0m\tname_offset: \x1b[32m0x{x}\x1b[0m", .{
+            std.mem.span(dllName),
             importDescriptorPtr.FirstThunk,
             importDescriptorPtr.Name - 40,
         });
 
-        const dll_handle = win.LoadLibraryA(std.mem.span(dllName));
+        // const a: []u8 = (std.mem.span(dllName) ++ 0x0);
 
+        const dll_handle: win.HMODULE = win.LoadLibraryA(read_string_from_memory(dllNamePtr));
+        if (dll_handle == null) {
+            std.log.err("{s} not found", .{dllName});
+            return;
+        }
         var thunkptr: usize = @intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.unnamed_0.Characteristics)) - 40;
 
         while (true) {
@@ -76,10 +81,13 @@ fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS) vo
             }
 
             const funcname = read_string_from_memory(@ptrFromInt(@intFromPtr(baseptr) - 40 + offset + 2));
-            std.log.debug("{s}", .{std.mem.span(funcname)});
+            std.log.debug("function : \x1b[33m{s}\x1b[0m", .{std.mem.span(funcname)});
 
-            const funcaddress = win.GetProcAddress(dll_handle, std.mem.span(funcname));
-            std.log.debug("{any}", .{funcaddress});
+            const funcaddress: win.FARPROC = win.GetProcAddress(dll_handle, read_string_from_memory(@ptrFromInt(@intFromPtr(baseptr) - 40 + offset + 2)));
+            if (funcaddress == null) {
+                std.log.err("{s} not found", .{funcname});
+                return;
+            }
 
             thunkptr += @sizeOf(usize);
         }
