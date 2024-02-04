@@ -72,7 +72,6 @@ pub fn write_sections(baseptr: ?*anyopaque, buffer: []u8, dos_header: *win.IMAGE
     for (0..nt_header.*.FileHeader.NumberOfSections) |count| {
         const nt_section_header: *win.IMAGE_SECTION_HEADER = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(dos_header.*.e_lfanew)) + @sizeOf(win.IMAGE_NT_HEADERS) + (count * @sizeOf(win.IMAGE_SECTION_HEADER)));
         std.log.debug("name : \x1b[32m{s}\x1b[0m\t ptr : \x1b[33m0x{x}\x1b[0m\t size : \x1b[36m{}\x1b[0m", .{ nt_section_header.*.Name, nt_section_header.*.PointerToRawData, nt_section_header.*.SizeOfRawData });
-        const VirtualAddress: [*]u8 = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(nt_section_header.*.VirtualAddress)));
-        @memcpy(VirtualAddress, buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.*.PointerToRawData + nt_section_header.*.SizeOfRawData)]);
+        @memcpy(@as([*]u8, @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(nt_section_header.*.VirtualAddress)))), buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.*.PointerToRawData + nt_section_header.*.SizeOfRawData)]);
     }
 }
