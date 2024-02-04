@@ -63,7 +63,7 @@ fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS) vo
             importDescriptorPtr.Name - 40,
         });
 
-        const dll_handle = win.LoadLibraryA(dllName[0..99]);
+        const dll_handle = win.LoadLibraryA(std.mem.span(dllName));
 
         var thunkptr: usize = @intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.unnamed_0.Characteristics)) - 40;
 
@@ -76,10 +76,10 @@ fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS) vo
             }
 
             const funcname = read_string_from_memory(@ptrFromInt(@intFromPtr(baseptr) - 40 + offset + 2));
-            std.log.debug("{s}", .{funcname[0..99]});
+            std.log.debug("{s}", .{std.mem.span(funcname)});
 
-            const funcaddress = win.GetProcAddress(dll_handle, funcname[0..99]);
-            std.log.debug("{any}\n", .{funcaddress});
+            const funcaddress = win.GetProcAddress(dll_handle, std.mem.span(funcname));
+            std.log.debug("{any}", .{funcaddress});
 
             thunkptr += @sizeOf(usize);
         }
