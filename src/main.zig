@@ -55,25 +55,41 @@ fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS) vo
         const dllNamePtr: [*]u8 =
             @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.Name)) - 40);
 
-        const dllName = read_dll_from_memory(dllNamePtr);
+        const dllName = read_string_from_memory(dllNamePtr);
 
-        std.debug.print("{s} {x} {x}\n", .{
+        std.log.debug("DLL : \x1b[34m{s}\x1b[0m\tFirstThunk : \x1b[31m0x{x}\x1b[0m\tName offset: \x1b[32m0x{x}\x1b[0m", .{
             dllName,
             importDescriptorPtr.FirstThunk,
             importDescriptorPtr.Name - 40,
         });
 
-        const dll_handle = win.LoadLibraryA(dllName);
-        _ = dll_handle; // autofix
+        const dll_handle = win.LoadLibraryA(dllName[0..99]);
 
-        std.debug.print("{}, {}\n", .{ importDescriptorPtr.unnamed_0.OriginalFirstThunk, importDescriptorPtr.unnamed_0.Characteristics });
+        var thunkptr: usize = @intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.unnamed_0.Characteristics)) - 40;
+
+        while (true) {
+            const thunk: [*]u8 = @ptrFromInt(thunkptr);
+            const offset: usize = std.mem.readVarInt(usize, thunk[0..@sizeOf(usize)], std.builtin.Endian.little);
+
+            if (offset == 0) {
+                break;
+            }
+
+            const funcname = read_string_from_memory(@ptrFromInt(@intFromPtr(baseptr) - 40 + offset + 2));
+            std.log.debug("{s}", .{funcname[0..99]});
+
+            const funcaddress = win.GetProcAddress(dll_handle, funcname[0..99]);
+            std.log.debug("{any}\n", .{funcaddress});
+
+            thunkptr += @sizeOf(usize);
+        }
 
         // Move to the next import descriptor
         importDescriptorPtr = @ptrFromInt(@intFromPtr(importDescriptorPtr) + @sizeOf(win.IMAGE_IMPORT_DESCRIPTOR));
     }
 }
 
-fn read_dll_from_memory(baseptr: [*]u8) [*:0]const u8 {
+fn read_string_from_memory(baseptr: [*]u8) [*:0]const u8 {
     var temp: [100]u8 = undefined;
     for (0..100) |i| {
         temp[i] = baseptr[i];
