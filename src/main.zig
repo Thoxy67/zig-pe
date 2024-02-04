@@ -30,22 +30,49 @@ pub fn main() !void {
 
     @memcpy(addr_array_ptr, header);
 
-    const dosheader: *win.IMAGE_DOS_HEADER = @ptrCast(@alignCast(addr_array_ptr));
+    const dosheader: *const win.IMAGE_DOS_HEADER = @ptrCast(@alignCast(addr_alloc));
     //std.debug.print("{any} \n", .{dosheader});
 
-    const lp_nt_header = pe.get_nt_header64(addr_array_ptr, dosheader);
+    const lp_nt_header: *const win.IMAGE_NT_HEADERS = pe.get_nt_header64(addr_alloc, dosheader);
     //std.debug.print("{any} \n", .{lp_nt_header});
 
-    pe.write_sections(addr_array_ptr, file_content, dosheader, lp_nt_header);
+    pe.write_sections(addr_alloc, file_content, dosheader, lp_nt_header);
 
-    pe.write_import_table(addr_array_ptr, lp_nt_header);
+    pe.write_import_table(addr_alloc, lp_nt_header);
 
     // fix_base_relocations(baseptr, nt_header);
 
-    // execute_image(addr_array_ptr, lp_nt_header);
+    //fix_base_relocations(addr_alloc, lp_nt_header);
 
+    pe.execute_image(addr_array_ptr, lp_nt_header);
 }
 
-// TODO : fn fix_base_relocations(baseptr, nt_header)
+// FIXME
+fn fix_base_relocations(baseptr: ?*const anyopaque, nt_header: *const win.IMAGE_NT_HEADERS) void {
+    _ = baseptr; // autofix
+    const basereloc = nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC];
+    if (basereloc.Size == 0) {
+        return;
+    }
+
+    std.debug.print("{}, {}\n", .{ nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].Size, nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress });
+
+    // //std.debug.print("{}\n", .{nt_header.OptionalHeader.ImageBase});
+
+    // const diffaddress = @intFromPtr(baseptr) - nt_header.OptionalHeader.ImageBase;
+    // _ = diffaddress; // autofix
+    // //std.debug.print("{}\n", .{diffaddress});
+    // const relocptr: *win.IMAGE_BASE_RELOCATION = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress));
+    // _ = relocptr; // autofix
+
+    //std.debug.print("{any}\n", .{relocptr});
+
+    // const entries: u32 = (relocptr.*.SizeOfBlock - @as(u32, @sizeOf(win.IMAGE_BASE_RELOCATION))) / 2;
+    // std.debug.print("{}\n", .{entries});
+
+    //while (@as(u32, relocptr.SizeOfBlock) != 0) {}
+
+    //std.debug.print("{x}, {x}\n", .{ relocptr.*.SizeOfBlock, relocptr.*.VirtualAddress });
+}
 
 test "simple test" {}

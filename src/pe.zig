@@ -57,29 +57,30 @@ pub fn get_image_size(buffer: []u8) ImageSizeError!usize {
 }
 
 /// Function to get the DOS header
-pub fn get_dos_header(lp_image: ?*anyopaque) *win.IMAGE_DOS_HEADER {
+pub fn get_dos_header(lp_image: ?*const anyopaque) *win.IMAGE_DOS_HEADER {
     return @ptrCast(@constCast(&lp_image));
 }
 
 /// Function to get the NT header
-pub fn get_nt_header64(lp_image: ?*anyopaque, lp_dos_header: *win.IMAGE_DOS_HEADER) *win.IMAGE_NT_HEADERS {
-    return @as(*win.IMAGE_NT_HEADERS, @ptrFromInt(@intFromPtr(lp_image) + @as(usize, @intCast(lp_dos_header.*.e_lfanew))));
+pub fn get_nt_header64(lp_image: ?*const anyopaque, lp_dos_header: *const win.IMAGE_DOS_HEADER) *const win.IMAGE_NT_HEADERS {
+    const nt_header: *win.IMAGE_NT_HEADERS = @ptrFromInt(@intFromPtr(lp_image) + @as(usize, @intCast(lp_dos_header.e_lfanew)));
+    return nt_header;
 }
 
 /// Writes each section of the PE file to the allocated memory in the target process.
-pub fn write_sections(baseptr: ?*anyopaque, buffer: []u8, dos_header: *win.IMAGE_DOS_HEADER, nt_header: *win.IMAGE_NT_HEADERS) void {
+pub fn write_sections(baseptr: ?*const anyopaque, buffer: []u8, dos_header: *const win.IMAGE_DOS_HEADER, nt_header: *const win.IMAGE_NT_HEADERS) void {
     std.log.debug("\x1b[0;1m[-] === Write IMAGE_SECTION_HEADERS ===\x1b[0m", .{});
-    for (0..nt_header.*.FileHeader.NumberOfSections) |count| {
-        const nt_section_header: *win.IMAGE_SECTION_HEADER = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(dos_header.*.e_lfanew)) + @sizeOf(win.IMAGE_NT_HEADERS) + (count * @sizeOf(win.IMAGE_SECTION_HEADER)));
-        std.log.debug("name : \x1b[32m{s}\x1b[0m\t ptr : \x1b[33m0x{x}\x1b[0m\t size : \x1b[36m{}\x1b[0m", .{ nt_section_header.*.Name, nt_section_header.*.PointerToRawData, nt_section_header.*.SizeOfRawData });
-        @memcpy(@as([*]u8, @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(nt_section_header.*.VirtualAddress)))), buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.*.PointerToRawData + nt_section_header.*.SizeOfRawData)]);
+    for (0..nt_header.FileHeader.NumberOfSections) |count| {
+        const nt_section_header: *win.IMAGE_SECTION_HEADER = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(dos_header.e_lfanew)) + @sizeOf(win.IMAGE_NT_HEADERS) + (count * @sizeOf(win.IMAGE_SECTION_HEADER)));
+        std.log.debug("name : \x1b[32m{s}\x1b[0m\t ptr : \x1b[33m0x{x}\x1b[0m\t size : \x1b[36m{}\x1b[0m", .{ nt_section_header.Name, nt_section_header.PointerToRawData, nt_section_header.SizeOfRawData });
+        @memcpy(@as([*]u8, @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(nt_section_header.VirtualAddress)))), buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.PointerToRawData + nt_section_header.SizeOfRawData)]);
     }
 }
 
 /// Writes the import table of the PE file to the allocated memory in the target process.
-pub fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS) void {
+pub fn write_import_table(baseptr: ?*const anyopaque, nt_header: *const win.IMAGE_NT_HEADERS) void {
     std.log.debug("\x1b[0;1m[-] === Get Write Import Table ===\x1b[0m", .{});
-    const import_dir = nt_header.*.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_IMPORT];
+    const import_dir = nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_IMPORT];
     if (import_dir.Size == 0) {
         return;
     }
@@ -140,8 +141,8 @@ pub fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS
 }
 
 /// Executes the image by calling its entry point and waiting for the thread to finish executing.
-pub fn execute_image(baseptr: [*]u8, nt_header: *win.IMAGE_NT_HEADERS) void {
-    const entrypoint: *void = @ptrFromInt(@intFromPtr(baseptr) - 40 + @as(usize, @intCast(nt_header.OptionalHeader.AddressOfEntryPoint)));
+pub fn execute_image(baseptr: ?*const anyopaque, nt_header: *const win.IMAGE_NT_HEADERS) void {
+    const entrypoint: *const fn () void = @ptrFromInt(@intFromPtr(baseptr) - 40 + @as(usize, @intCast(nt_header.OptionalHeader.AddressOfEntryPoint)));
     entrypoint();
 }
 
