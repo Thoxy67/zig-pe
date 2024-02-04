@@ -42,9 +42,9 @@ pub fn main() !void {
 
     // fix_base_relocations(baseptr, nt_header);
 
-    //fix_base_relocations(addr_alloc, lp_nt_header);
+    fix_base_relocations(addr_alloc, lp_nt_header);
 
-    pe.execute_image(addr_array_ptr, lp_nt_header);
+    //pe.execute_image(addr_array_ptr, lp_nt_header);
 }
 
 // FIXME
@@ -55,7 +55,7 @@ fn fix_base_relocations(baseptr: ?*const anyopaque, nt_header: *const win.IMAGE_
         return;
     }
 
-    std.debug.print("{}, {}\n", .{ nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].Size, nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress });
+    //std.debug.print("{}, {}\n", .{ nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].Size, nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress });
 
     // //std.debug.print("{}\n", .{nt_header.OptionalHeader.ImageBase});
 

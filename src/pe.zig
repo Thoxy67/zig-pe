@@ -57,13 +57,13 @@ pub fn get_image_size(buffer: []u8) ImageSizeError!usize {
 }
 
 /// Function to get the DOS header
-pub fn get_dos_header(lp_image: ?*const anyopaque) *win.IMAGE_DOS_HEADER {
+pub fn get_dos_header(lp_image: ?*const anyopaque) *const win.IMAGE_DOS_HEADER {
     return @ptrCast(@constCast(&lp_image));
 }
 
 /// Function to get the NT header
 pub fn get_nt_header64(lp_image: ?*const anyopaque, lp_dos_header: *const win.IMAGE_DOS_HEADER) *const win.IMAGE_NT_HEADERS {
-    const nt_header: *win.IMAGE_NT_HEADERS = @ptrFromInt(@intFromPtr(lp_image) + @as(usize, @intCast(lp_dos_header.e_lfanew)));
+    const nt_header: *const win.IMAGE_NT_HEADERS = @ptrFromInt(@intFromPtr(lp_image) + @as(usize, @intCast(lp_dos_header.e_lfanew)));
     return nt_header;
 }
 
@@ -71,7 +71,7 @@ pub fn get_nt_header64(lp_image: ?*const anyopaque, lp_dos_header: *const win.IM
 pub fn write_sections(baseptr: ?*const anyopaque, buffer: []u8, dos_header: *const win.IMAGE_DOS_HEADER, nt_header: *const win.IMAGE_NT_HEADERS) void {
     std.log.debug("\x1b[0;1m[-] === Write IMAGE_SECTION_HEADERS ===\x1b[0m", .{});
     for (0..nt_header.FileHeader.NumberOfSections) |count| {
-        const nt_section_header: *win.IMAGE_SECTION_HEADER = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(dos_header.e_lfanew)) + @sizeOf(win.IMAGE_NT_HEADERS) + (count * @sizeOf(win.IMAGE_SECTION_HEADER)));
+        const nt_section_header: *const win.IMAGE_SECTION_HEADER = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(dos_header.e_lfanew)) + @sizeOf(win.IMAGE_NT_HEADERS) + (count * @sizeOf(win.IMAGE_SECTION_HEADER)));
         std.log.debug("name : \x1b[32m{s}\x1b[0m\t ptr : \x1b[33m0x{x}\x1b[0m\t size : \x1b[36m{}\x1b[0m", .{ nt_section_header.Name, nt_section_header.PointerToRawData, nt_section_header.SizeOfRawData });
         @memcpy(@as([*]u8, @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(nt_section_header.VirtualAddress)))), buffer[(nt_section_header.PointerToRawData + (@sizeOf(win.IMAGE_SECTION_HEADER)))..(nt_section_header.PointerToRawData + nt_section_header.SizeOfRawData)]);
     }
@@ -84,7 +84,7 @@ pub fn write_import_table(baseptr: ?*const anyopaque, nt_header: *const win.IMAG
     if (import_dir.Size == 0) {
         return;
     }
-    var importDescriptorPtr: *win.IMAGE_IMPORT_DESCRIPTOR =
+    var importDescriptorPtr: *const win.IMAGE_IMPORT_DESCRIPTOR =
         @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(import_dir.VirtualAddress)) - 40);
 
     var i: usize = 0;
@@ -101,8 +101,6 @@ pub fn write_import_table(baseptr: ?*const anyopaque, nt_header: *const win.IMAG
             importDescriptorPtr.Name - 40,
         });
 
-        // const a: []u8 = (std.mem.span(dllName) ++ 0x0);
-
         const dll_handle: win.HMODULE = win.LoadLibraryA(read_string_from_memory(dllNamePtr));
         if (dll_handle == null) {
             std.log.err("{s} not found", .{dllName});
@@ -113,7 +111,6 @@ pub fn write_import_table(baseptr: ?*const anyopaque, nt_header: *const win.IMAG
         while (true) {
             const thunk: [*]u8 = @ptrFromInt(thunkptr);
             const offset: usize = std.mem.readVarInt(usize, thunk[0..@sizeOf(usize)], std.builtin.Endian.little);
-
             if (offset == 0) {
                 break;
             }
