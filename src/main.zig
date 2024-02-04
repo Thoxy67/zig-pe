@@ -39,6 +39,13 @@ pub fn main() !void {
     pe.write_sections(addr_array_ptr, file_content, dosheader, lp_nt_header);
 
     pe.write_import_table(addr_array_ptr, lp_nt_header);
+
+    // fix_base_relocations(baseptr, nt_header);
+
+    // execute_image(addr_array_ptr, lp_nt_header);
+
 }
+
+// TODO : fn fix_base_relocations(baseptr, nt_header)
 
 test "simple test" {}

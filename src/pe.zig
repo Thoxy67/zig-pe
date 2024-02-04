@@ -139,6 +139,12 @@ pub fn write_import_table(baseptr: ?*anyopaque, nt_header: *win.IMAGE_NT_HEADERS
     }
 }
 
+/// Executes the image by calling its entry point and waiting for the thread to finish executing.
+pub fn execute_image(baseptr: [*]u8, nt_header: *win.IMAGE_NT_HEADERS) void {
+    const entrypoint: *void = @ptrFromInt(@intFromPtr(baseptr) - 40 + @as(usize, @intCast(nt_header.OptionalHeader.AddressOfEntryPoint)));
+    entrypoint();
+}
+
 /// Reads a string from memory.
 fn read_string_from_memory(baseptr: [*]u8) [*:0]const u8 {
     var temp: [100]u8 = undefined;
