@@ -12,6 +12,17 @@ My NT header has good value but some are not.
 
 I will try to fix it later when my motivation come back.
 
+- [x] - Get DOS_IMAGE_HEADER
+- [x] - Get NT_IMAGE_HEADER
+- [x] - Get DOS_IMAGE_HEADER size
+- [x] - Get NT_IMAGE_HEADER size
+- [x] - Alloc memory to bind PE image
+- [x] - @memcpy the PE to the allocated memory pointer
+- [x] - Write section to header
+- [x] - Write import table (import dll's and functions)
+- [ ] - Fix base relocation (really painfull)
+- [x] - Call the entrypoint as function (logic seems ok but I can't test without fixing base relocation)
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
