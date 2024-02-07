@@ -21,7 +21,7 @@ pub fn main() !void {
         return e;
     };
 
-    const addr_alloc: win.LPVOID = std.os.windows.VirtualAlloc(null, image_size, std.os.windows.MEM_COMMIT, std.os.windows.PAGE_READWRITE) catch |e| {
+    const addr_alloc: win.LPVOID = std.os.windows.VirtualAlloc(null, image_size, std.os.windows.MEM_COMMIT | std.os.windows.MEM_RESERVE, std.os.windows.PAGE_READWRITE) catch |e| {
         std.log.err("cannot alloc virtual memory {}\n", .{e});
         return e;
     };
@@ -42,6 +42,10 @@ pub fn main() !void {
 
     // fix_base_relocations(baseptr, nt_header);
 
+    //std.debug.print("0x{x}\n", .{@intFromPtr(addr_array_ptr)});
+
+    //while (true) {}
+
     fix_base_relocations(addr_alloc, lp_nt_header);
 
     //pe.execute_image(addr_array_ptr, lp_nt_header);
@@ -49,30 +53,67 @@ pub fn main() !void {
 
 // FIXME
 fn fix_base_relocations(baseptr: ?*const anyopaque, nt_header: *const win.IMAGE_NT_HEADERS) void {
-    _ = baseptr; // autofix
-    const basereloc = nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC];
-    if (basereloc.Size == 0) {
-        return;
+    const optionalHeader = nt_header.*.OptionalHeader;
+    const relocationDirRVA: u32 = optionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
+
+    var base_ptr: usize = @intFromPtr(@as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(@intFromPtr(baseptr) + relocationDirRVA)));
+
+    const relocationDirSize: u32 = optionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+
+    std.debug.print("Optional Header Base: {x}\n", .{optionalHeader.ImageBase});
+    std.debug.print("Relocation RVA: {x}, Size: {x}, Base: {x}\n", .{ relocationDirRVA, relocationDirSize, base_ptr });
+
+    var base = @as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(base_ptr));
+
+    while (base.*.SizeOfBlock != 0) {
+        if (relocationDirSize == 0) {
+            break;
+        }
+        const entries_count: u32 = (base.*.SizeOfBlock - 8) / 2;
+
+        std.debug.print("Entries Count: {x}\n", .{entries_count});
+
+        // for (0..entries_count) |i| {
+        //     const offset_ptr: [*]u8 = @ptrFromInt((base_ptr + 8) + (i * 2));
+        //     const offset: i16 = std.mem.readVarInt(i16, offset_ptr[0..2], std.builtin.Endian.little);
+        //     std.debug.print("offset: {x}\n", .{offset});
+        // }
+
+        base_ptr += relocationDirSize;
+        base = @as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(base_ptr));
     }
-
-    //std.debug.print("{}, {}\n", .{ nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].Size, nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress });
-
-    // //std.debug.print("{}\n", .{nt_header.OptionalHeader.ImageBase});
-
-    // const diffaddress = @intFromPtr(baseptr) - nt_header.OptionalHeader.ImageBase;
-    // _ = diffaddress; // autofix
-    // //std.debug.print("{}\n", .{diffaddress});
-    // const relocptr: *win.IMAGE_BASE_RELOCATION = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress));
-    // _ = relocptr; // autofix
-
-    //std.debug.print("{any}\n", .{relocptr});
-
-    // const entries: u32 = (relocptr.*.SizeOfBlock - @as(u32, @sizeOf(win.IMAGE_BASE_RELOCATION))) / 2;
-    // std.debug.print("{}\n", .{entries});
-
-    //while (@as(u32, relocptr.SizeOfBlock) != 0) {}
-
-    //std.debug.print("{x}, {x}\n", .{ relocptr.*.SizeOfBlock, relocptr.*.VirtualAddress });
+    while (true) {}
 }
 
 test "simple test" {}
+
+// BOOL FixRelocs(void *base, void *rBase, IMAGE_NT_HEADERS *ntHd, IMAGE_BASE_RELOCATION *reloc,unsigned int size) {
+//     unsigned long ImageBase = ntHd->OptionalHeader.ImageBase;
+//     unsigned int nBytes = 0;
+//     unsigned long delta = MakeDelta(unsigned long, rBase, ImageBase);
+//     unsigned long *locBase;
+// unsigned int numRelocs;
+// unsigned short *locData;
+// unsigned int i;
+
+// while(1) {
+//   locBase =
+//      (unsigned long *)GetPtrFromRVA((DWORD)(reloc->VirtualAddress), ntHd, (PBYTE)base);
+//   numRelocs = (reloc->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
+
+//   if(nBytes >= size) break;
+
+//   locData = MakePtr(unsigned short *, reloc, sizeof(IMAGE_BASE_RELOCATION));
+//   for(i = 0; i < numRelocs; i++) {
+//      if(((*locData >> 12) == IMAGE_REL_BASED_HIGHLOW))
+//          *MakePtr(unsigned long *, locBase, (*locData & 0x0FFF)) += delta;
+//      locData++;
+//   }
+
+//   nBytes += reloc->SizeOfBlock;
+//   reloc = (IMAGE_BASE_RELOCATION *)locData;
+//    }
+
+//    return TRUE;
+
+// }
