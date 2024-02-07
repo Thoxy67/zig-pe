@@ -7,7 +7,7 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub fn main() !void {
     // const file_content = @embedFile("bin\\putty.exe");
 
-    const file_name = "bin/putty.exe";
+    const file_name = "bin/messagebox.exe";
     const file_content = try std.fs.cwd().readFileAlloc(gpa.allocator(), file_name, std.math.maxInt(usize));
 
     const header_size = pe.get_headers_size(file_content) catch |e| {
@@ -48,39 +48,48 @@ pub fn main() !void {
 
     fix_base_relocations(addr_alloc, lp_nt_header);
 
-    //pe.execute_image(addr_array_ptr, lp_nt_header);
+    pe.execute_image(addr_alloc, lp_nt_header);
 }
 
 // FIXME
 fn fix_base_relocations(baseptr: ?*const anyopaque, nt_header: *const win.IMAGE_NT_HEADERS) void {
+    const delta: *u8 = @ptrFromInt(@intFromPtr(baseptr) - nt_header.*.OptionalHeader.ImageBase);
+    std.debug.print("Delta: {*}\n", .{delta});
     const optionalHeader = nt_header.*.OptionalHeader;
     const relocationDirRVA: u32 = optionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
 
-    var base_ptr: usize = @intFromPtr(@as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(@intFromPtr(baseptr) + relocationDirRVA)));
-
     const relocationDirSize: u32 = optionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
 
+    var base_ptr: usize = @intFromPtr(@as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(@intFromPtr(baseptr) + relocationDirRVA)));
     std.debug.print("Optional Header Base: {x}\n", .{optionalHeader.ImageBase});
     std.debug.print("Relocation RVA: {x}, Size: {x}, Base: {x}\n", .{ relocationDirRVA, relocationDirSize, base_ptr });
 
-    var base = @as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(base_ptr));
+    var base: *const win.IMAGE_BASE_RELOCATION = @as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(base_ptr));
 
     while (base.*.SizeOfBlock != 0) {
-        if (relocationDirSize == 0) {
+        if (base.*.SizeOfBlock == 0) {
             break;
         }
-        const entries_count: u32 = (base.*.SizeOfBlock - 8) / 2;
+        const entries_count: u32 = (base.SizeOfBlock - 8) / 2;
 
         std.debug.print("Entries Count: {x}\n", .{entries_count});
 
         // for (0..entries_count) |i| {
-        //     const offset_ptr: [*]u8 = @ptrFromInt((base_ptr + 8) + (i * 2));
-        //     const offset: i16 = std.mem.readVarInt(i16, offset_ptr[0..2], std.builtin.Endian.little);
-        //     std.debug.print("offset: {x}\n", .{offset});
+        //     const offset: *const u16 = @ptrFromInt((base_ptr + @sizeOf(win.IMAGE_BASE_RELOCATION)) + (i * 2));
+
+        //     if (offset.* >> 12 != win.IMAGE_REL_BASED_ABSOLUTE) {
+        //         const pagerva = offset.* & 0x0fff;
+
+        //         const finaladdress: *usize = @ptrFromInt(base_ptr + base.*.VirtualAddress + pagerva);
+        //         std.debug.print("Final Address: {*}\n", .{finaladdress});
+
+        //         finaladdress.* += @intFromPtr(delta);
+        //     }
         // }
 
-        base_ptr += relocationDirSize;
-        base = @as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(base_ptr));
+        base_ptr += base.*.SizeOfBlock;
+        const final = @as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(base_ptr));
+        base = final;
     }
     while (true) {}
 }
