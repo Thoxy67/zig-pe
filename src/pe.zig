@@ -62,7 +62,7 @@ pub fn get_dos_header(lp_image: ?*const anyopaque) *const win.IMAGE_DOS_HEADER {
 }
 
 /// Function to get the NT header
-pub fn get_nt_header64(lp_image: ?*const anyopaque, lp_dos_header: *const win.IMAGE_DOS_HEADER) *const win.IMAGE_NT_HEADERS {
+pub fn get_nt_header(lp_image: ?*const anyopaque, lp_dos_header: *const win.IMAGE_DOS_HEADER) *const win.IMAGE_NT_HEADERS {
     const nt_header: *const win.IMAGE_NT_HEADERS = @ptrFromInt(@intFromPtr(lp_image) + @as(usize, @intCast(lp_dos_header.e_lfanew)));
     return nt_header;
 }
@@ -116,7 +116,6 @@ pub fn write_import_table(baseptr: ?*const anyopaque, nt_header: *const win.IMAG
             }
 
             const funcname = read_string_from_memory(@ptrFromInt(@intFromPtr(baseptr) + offset + 2));
-            std.log.debug("function : \x1b[33m{s}\x1b[0m", .{std.mem.span(funcname)});
 
             const funcaddress: win.FARPROC = win.GetProcAddress(dll_handle, read_string_from_memory(@ptrFromInt(@intFromPtr(baseptr) + offset + 2)));
             if (funcaddress == null) {
@@ -126,7 +125,9 @@ pub fn write_import_table(baseptr: ?*const anyopaque, nt_header: *const win.IMAG
 
             const funcaddress_ptr: *usize = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.FirstThunk)) + i * @sizeOf(usize));
 
-            funcaddress_ptr.* = @intCast(@intFromPtr(funcaddress));
+            funcaddress_ptr.* = @intFromPtr(funcaddress);
+
+            std.log.debug("function : \x1b[33m{s}\x1b[0m, ptr: \x1b[30m{*}\x1b[0m, new_ptr: \x1b[32m{?}\x1b[0m", .{ std.mem.span(funcname), funcaddress_ptr, funcaddress });
 
             i += 1;
             thunkptr += @sizeOf(usize);
