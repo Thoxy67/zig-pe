@@ -4,14 +4,6 @@ Simple RunPE loader written in zig.
 
 ## Information
 
-For now this not work. I need to fix base relocation but I'm little bit tired to code in Zig.
-
-Zig is a wonderful language but it seems to need a little bit more work.
-Some things are really weird in Zig my write import library are 40 bytes to far from where it need to grab dll names and function.
-My NT header has good value but some are not.
-
-I will try to fix it later when my motivation come back.
-
 - [x] - Get DOS_IMAGE_HEADER
 - [x] - Get NT_IMAGE_HEADER
 - [x] - Get DOS_IMAGE_HEADER size
@@ -22,6 +14,11 @@ I will try to fix it later when my motivation come back.
 - [x] - Write import table (import dll's and functions)
 - [x] - Fix base relocation
 - [x] - Call the entrypoint as function
+
+
+- [x] - Native compiled binary launch
+- [ ] - .NET compiled binary launch
+
 
 ## License
 
