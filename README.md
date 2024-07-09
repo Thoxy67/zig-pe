@@ -20,8 +20,8 @@ I will try to fix it later when my motivation come back.
 - [x] - @memcpy the PE to the allocated memory pointer
 - [x] - Write section to header
 - [x] - Write import table (import dll's and functions)
-- [x] - Fix base relocation (really painfull)
-- [x] - Call the entrypoint as function (logic seems ok but I can't test without fixing base relocation)
+- [x] - Fix base relocation
+- [x] - Call the entrypoint as function
 
 ## License
 
