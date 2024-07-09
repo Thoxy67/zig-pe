@@ -5,89 +5,81 @@ const pe = @import("pe.zig");
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn main() !void {
-    const file_name = "bin/messagebox.exe"; // Ok
-    var file_content = try std.fs.cwd().readFileAlloc(gpa.allocator(), file_name, std.math.maxInt(usize)); // Ok
+    const file_name = "bin/messagebox.exe";
+    var file_content = try std.fs.cwd().readFileAlloc(gpa.allocator(), file_name, std.math.maxInt(usize));
+    defer gpa.allocator().free(file_content);
 
-    // Ok
-    const header_size = pe.get_headers_size(file_content) catch |e| {
-        std.log.err("cannot get header size : {}\n", .{e});
-        return e;
-    };
-    const header = file_content[0..header_size]; // Ok
+    const header_size = try pe.get_headers_size(file_content);
+    const header = file_content[0..header_size];
 
-    // Ok
-    const image_size = pe.get_image_size(file_content) catch |e| {
-        std.log.err("cannot get image size : {}\n", .{e});
-        return e;
-    };
+    const image_size = try pe.get_image_size(file_content);
 
-    // Ok
-    const addr_alloc: win.LPVOID = std.os.windows.VirtualAlloc(null, image_size, std.os.windows.MEM_COMMIT | std.os.windows.MEM_RESERVE, std.os.windows.PAGE_READWRITE) catch |e| {
-        std.log.err("cannot alloc virtual memory {}\n", .{e});
-        return e;
-    };
+    const addr_alloc: win.LPVOID = try std.os.windows.VirtualAlloc(null, image_size, std.os.windows.MEM_COMMIT | std.os.windows.MEM_RESERVE, std.os.windows.PAGE_READWRITE);
 
-    const addr_array_ptr: [*]u8 = @ptrCast(addr_alloc); // Ok
+    const addr_array_ptr: [*]u8 = @ptrCast(addr_alloc);
 
-    @memcpy(addr_array_ptr, header); // Ok
+    @memcpy(addr_array_ptr[0..header_size], header);
 
-    const dosheader: *const win.IMAGE_DOS_HEADER = @ptrCast(@alignCast(addr_array_ptr)); // Ok
-    const lp_nt_header: *const win.IMAGE_NT_HEADERS = pe.get_nt_header(addr_array_ptr, dosheader); // Ok
+    const dosheader: *const win.IMAGE_DOS_HEADER = @ptrCast(@alignCast(addr_array_ptr));
+    const lp_nt_header: *const win.IMAGE_NT_HEADERS = pe.get_nt_header(addr_array_ptr, dosheader);
 
-    pe.write_sections(addr_array_ptr, file_content, dosheader, lp_nt_header); // Ok
+    pe.write_sections(addr_array_ptr, file_content, dosheader, lp_nt_header);
 
-    pe.write_import_table(addr_array_ptr, lp_nt_header); // I don't know but seems Ok
+    pe.write_import_table(addr_array_ptr, lp_nt_header);
 
-    fix_base_relocations(addr_array_ptr, lp_nt_header); // Not Ok
+    try fix_base_relocations(addr_array_ptr, lp_nt_header);
 
-    //pe.execute_image(addr_array_ptr, lp_nt_header); // I can't test without fixing base relocations
+    // Change memory protection
+    var old_protect: win.DWORD = undefined;
+    _ = win.VirtualProtect(addr_alloc, image_size, win.PAGE_EXECUTE_READ, &old_protect);
+
+    // Execute the image
+    pe.execute_image(addr_array_ptr, lp_nt_header);
+
+    // Free the allocated memory
+    _ = win.VirtualFree(addr_alloc, 0, win.MEM_RELEASE);
 }
 
 // FIXME
-fn fix_base_relocations(baseptr: ?*const anyopaque, nt_header: *const win.IMAGE_NT_HEADERS) void {
-    _ = baseptr;
+fn fix_base_relocations(baseptr: [*]u8, nt_header: *const win.IMAGE_NT_HEADERS) !void {
     std.log.debug("\x1b[0;1m[-] === Fixing Base Relocation Table ===\x1b[0m", .{});
 
-    //const delta: *usize = @ptrFromInt(@intFromPtr(baseptr) - nt_header.*.OptionalHeader.ImageBase);
-    const optionalHeader = nt_header.*.OptionalHeader;
-    _ = optionalHeader;
-    //const relocationDirRVA: u32 = optionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
+    const delta = @intFromPtr(baseptr) - nt_header.OptionalHeader.ImageBase;
+    const reloc_dir = &nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC];
 
-    // const relocationDirSize: u32 = optionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+    if (reloc_dir.Size == 0) {
+        return; // No relocations needed
+    }
 
-    // var base_ptr: usize = @intFromPtr(@as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(@intFromPtr(baseptr) + relocationDirRVA)));
-    // std.debug.print("Optional Header Base: {x}\n", .{optionalHeader.ImageBase});
-    // std.debug.print("Relocation RVA: {x}, Size: {x}, Base: {x}\n", .{ relocationDirRVA, relocationDirSize, base_ptr });
+    var reloc_block: *win.IMAGE_BASE_RELOCATION = @ptrCast(@alignCast(baseptr + reloc_dir.VirtualAddress));
 
-    // var base: *const win.IMAGE_BASE_RELOCATION = @as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(base_ptr));
+    while (reloc_block.SizeOfBlock != 0) {
+        const entries = @as([*]u16, @ptrCast(@alignCast(reloc_block + 1)))[0 .. (reloc_block.SizeOfBlock - @sizeOf(win.IMAGE_BASE_RELOCATION)) / 2];
 
-    // while (base.*.SizeOfBlock != 0) {
-    //     if (base.*.SizeOfBlock == 0) {
-    //         break;
-    //     }
-    //     const entries_count: u32 = (base.SizeOfBlock - 8) / 2;
+        for (entries) |entry| {
+            const t = entry >> 12;
+            const offset = entry & 0xFFF;
 
-    //     std.debug.print("Entries Count: {x}\n", .{entries_count});
+            switch (t) {
+                win.IMAGE_REL_BASED_HIGHLOW => {
+                    const address = @as(*u32, @ptrCast(@alignCast(baseptr + reloc_block.VirtualAddress + offset)));
+                    address.* +%= @truncate(delta);
+                },
+                win.IMAGE_REL_BASED_DIR64 => {
+                    const address = @as(*u64, @ptrCast(@alignCast(baseptr + reloc_block.VirtualAddress + offset)));
+                    address.* +%= @as(u64, @bitCast(delta));
+                },
+                win.IMAGE_REL_BASED_ABSOLUTE => {
+                    // Do nothing, it's just for alignment
+                },
+                else => {
+                    return error.UnsupportedRelocationType;
+                },
+            }
+        }
 
-    //     for (0..entries_count) |i| {
-    //         const offset: *const u16 = @ptrFromInt(base_ptr + @sizeOf(win.IMAGE_BASE_RELOCATION) + (i * 2));
-
-    //         if (offset.* >> 12 != win.IMAGE_REL_BASED_ABSOLUTE) {
-    //             const pagerva: u16 = offset.* & 0x0fff;
-    //             std.debug.print("Offset: {x}, Offset_Page: {x}\n", .{ offset.*, pagerva });
-
-    //             const finaladdress: *usize = @ptrFromInt(base_ptr + base.*.VirtualAddress + (offset.* & 0x0fff));
-    //             std.debug.print("Final Address: {*}\n", .{finaladdress});
-
-    //             //finaladdress.* = finaladdress.* + delta.*;
-    //         }
-    //     }
-
-    //     base_ptr += base.*.SizeOfBlock;
-    //     const final = @as(*win.IMAGE_BASE_RELOCATION, @ptrFromInt(base_ptr));
-    //     base = final;
-    // }
-    while (true) {}
+        reloc_block = @as(*win.IMAGE_BASE_RELOCATION, @ptrCast(@alignCast(@as([*]u8, @ptrCast(reloc_block)) + reloc_block.SizeOfBlock)));
+    }
 }
 
 test "simple test" {}
