@@ -25,7 +25,7 @@ pub fn main() !void {
 
     pe.write_sections(addr_array_ptr, file_content, dosheader, lp_nt_header);
 
-    pe.write_import_table(addr_array_ptr, lp_nt_header);
+    try pe.write_import_table(addr_array_ptr, lp_nt_header);
 
     try pe.fix_base_relocations(addr_array_ptr, lp_nt_header);
 

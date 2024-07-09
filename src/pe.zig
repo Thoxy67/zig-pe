@@ -133,7 +133,7 @@ pub fn write_import_table(baseptr: ?*const anyopaque, nt_header: *const win.IMAG
 }
 
 /// Fix PE base relocation
-fn fix_base_relocations(baseptr: [*]u8, nt_header: *const win.IMAGE_NT_HEADERS) !void {
+pub fn fix_base_relocations(baseptr: [*]u8, nt_header: *const win.IMAGE_NT_HEADERS) !void {
     std.log.debug("\x1b[0;1m[-] === Fixing Base Relocation Table ===\x1b[0m", .{});
 
     const delta = @intFromPtr(baseptr) - nt_header.OptionalHeader.ImageBase;
@@ -146,7 +146,7 @@ fn fix_base_relocations(baseptr: [*]u8, nt_header: *const win.IMAGE_NT_HEADERS) 
     var reloc_block: *win.IMAGE_BASE_RELOCATION = @ptrCast(@alignCast(baseptr + reloc_dir.VirtualAddress));
 
     while (reloc_block.SizeOfBlock != 0) {
-        const entries = @as([*]u16, @ptrCast(@alignCast(reloc_block + 1)))[0 .. (reloc_block.SizeOfBlock - @sizeOf(win.IMAGE_BASE_RELOCATION)) / 2];
+        const entries = @as([*]u16, @ptrCast(@alignCast(@as([*]u8, @ptrCast(reloc_block)) + @sizeOf(win.IMAGE_BASE_RELOCATION))))[0 .. (reloc_block.SizeOfBlock - @sizeOf(win.IMAGE_BASE_RELOCATION)) / 2];
 
         for (entries) |entry| {
             const t = entry >> 12;
