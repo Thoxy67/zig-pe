@@ -111,7 +111,7 @@ pub fn write_import_table(baseptr: ?*const anyopaque, nt_header: *const win.IMAG
             } else {
                 // Import by name
                 const name_table_entry = @as(*align(1) const win.IMAGE_IMPORT_BY_NAME, @ptrFromInt(@intFromPtr(baseptr) + thunk.*));
-                const funcname = @as([*:0]const u8, &name_table_entry.Name);
+                const funcname: [*:0]const u8 = @ptrCast(&name_table_entry.Name[0]);
                 const funcaddress = win.GetProcAddress(dll_handle, funcname);
                 if (funcaddress == null) {
                     std.log.err("{s} not found in {s}", .{ funcname, dllName });
