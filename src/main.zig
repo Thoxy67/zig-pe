@@ -27,7 +27,7 @@ pub fn main() !void {
 
     pe.write_import_table(addr_array_ptr, lp_nt_header);
 
-    try fix_base_relocations(addr_array_ptr, lp_nt_header);
+    try pe.fix_base_relocations(addr_array_ptr, lp_nt_header);
 
     // Change memory protection
     var old_protect: win.DWORD = undefined;
@@ -41,45 +41,5 @@ pub fn main() !void {
 }
 
 // FIXME
-fn fix_base_relocations(baseptr: [*]u8, nt_header: *const win.IMAGE_NT_HEADERS) !void {
-    std.log.debug("\x1b[0;1m[-] === Fixing Base Relocation Table ===\x1b[0m", .{});
-
-    const delta = @intFromPtr(baseptr) - nt_header.OptionalHeader.ImageBase;
-    const reloc_dir = &nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC];
-
-    if (reloc_dir.Size == 0) {
-        return; // No relocations needed
-    }
-
-    var reloc_block: *win.IMAGE_BASE_RELOCATION = @ptrCast(@alignCast(baseptr + reloc_dir.VirtualAddress));
-
-    while (reloc_block.SizeOfBlock != 0) {
-        const entries = @as([*]u16, @ptrCast(@alignCast(reloc_block + 1)))[0 .. (reloc_block.SizeOfBlock - @sizeOf(win.IMAGE_BASE_RELOCATION)) / 2];
-
-        for (entries) |entry| {
-            const t = entry >> 12;
-            const offset = entry & 0xFFF;
-
-            switch (t) {
-                win.IMAGE_REL_BASED_HIGHLOW => {
-                    const address = @as(*u32, @ptrCast(@alignCast(baseptr + reloc_block.VirtualAddress + offset)));
-                    address.* +%= @truncate(delta);
-                },
-                win.IMAGE_REL_BASED_DIR64 => {
-                    const address = @as(*u64, @ptrCast(@alignCast(baseptr + reloc_block.VirtualAddress + offset)));
-                    address.* +%= @as(u64, @bitCast(delta));
-                },
-                win.IMAGE_REL_BASED_ABSOLUTE => {
-                    // Do nothing, it's just for alignment
-                },
-                else => {
-                    return error.UnsupportedRelocationType;
-                },
-            }
-        }
-
-        reloc_block = @as(*win.IMAGE_BASE_RELOCATION, @ptrCast(@alignCast(@as([*]u8, @ptrCast(reloc_block)) + reloc_block.SizeOfBlock)));
-    }
-}
 
 test "simple test" {}

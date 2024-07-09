@@ -132,11 +132,61 @@ pub fn write_import_table(baseptr: ?*const anyopaque, nt_header: *const win.IMAG
     }
 }
 
+/// Fix PE base relocation
+fn fix_base_relocations(baseptr: [*]u8, nt_header: *const win.IMAGE_NT_HEADERS) !void {
+    std.log.debug("\x1b[0;1m[-] === Fixing Base Relocation Table ===\x1b[0m", .{});
+
+    const delta = @intFromPtr(baseptr) - nt_header.OptionalHeader.ImageBase;
+    const reloc_dir = &nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC];
+
+    if (reloc_dir.Size == 0) {
+        return; // No relocations needed
+    }
+
+    var reloc_block: *win.IMAGE_BASE_RELOCATION = @ptrCast(@alignCast(baseptr + reloc_dir.VirtualAddress));
+
+    while (reloc_block.SizeOfBlock != 0) {
+        const entries = @as([*]u16, @ptrCast(@alignCast(reloc_block + 1)))[0 .. (reloc_block.SizeOfBlock - @sizeOf(win.IMAGE_BASE_RELOCATION)) / 2];
+
+        for (entries) |entry| {
+            const t = entry >> 12;
+            const offset = entry & 0xFFF;
+
+            switch (t) {
+                win.IMAGE_REL_BASED_HIGHLOW => {
+                    const address = @as(*u32, @ptrCast(@alignCast(baseptr + reloc_block.VirtualAddress + offset)));
+                    address.* +%= @truncate(delta);
+                },
+                win.IMAGE_REL_BASED_DIR64 => {
+                    const address = @as(*u64, @ptrCast(@alignCast(baseptr + reloc_block.VirtualAddress + offset)));
+                    address.* +%= @as(u64, @bitCast(delta));
+                },
+                win.IMAGE_REL_BASED_ABSOLUTE => {
+                    // Do nothing, it's just for alignment
+                },
+                else => {
+                    return error.UnsupportedRelocationType;
+                },
+            }
+        }
+
+        reloc_block = @as(*win.IMAGE_BASE_RELOCATION, @ptrCast(@alignCast(@as([*]u8, @ptrCast(reloc_block)) + reloc_block.SizeOfBlock)));
+    }
+}
+
 /// Executes the image by calling its entry point
 pub fn execute_image(baseptr: ?*const anyopaque, nt_header: *const win.IMAGE_NT_HEADERS) void {
     // Note: The subtraction of 40 has been removed as it was unexplained and potentially incorrect
     const entrypoint: *const fn () callconv(.C) void = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(nt_header.OptionalHeader.AddressOfEntryPoint)));
     entrypoint();
+}
+
+const COM_DESCRIPTOR_INDEX = 14; // Index in the DataDirectory array
+
+/// Detect whether the PE file is a .NET assembly
+pub fn is_dotnet_assembly(nt_headers: *const win.IMAGE_NT_HEADERS) bool {
+    const data_directory = &nt_headers.OptionalHeader.DataDirectory[COM_DESCRIPTOR_INDEX];
+    return data_directory.VirtualAddress != 0 and data_directory.Size != 0;
 }
 
 /// Reads a null-terminated string from memory.
