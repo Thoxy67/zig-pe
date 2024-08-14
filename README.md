@@ -51,13 +51,19 @@ const std = @import("std");
 const pe = @import("pe.zig");
 
 pub fn main() !void {
-    const file_name = "path/to/your/pe/file.exe";
-    var file_content = try std.fs.cwd().readFileAlloc(std.heap.page_allocator, file_name, std.math.maxInt(usize));
-    defer std.heap.page_allocator.free(file_content);
 
-    // Load and execute the PE file
-    try pe.load_and_execute(file_content);
+    // Use local PE
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // defer _ = gpa.deinit();
+    // const allocator = gpa.allocator();
+    // const file_name = "src/bin/putty.exe";
+    // const file_content = try std.fs.cwd().readFileAlloc(allocator, file_name, std.math.maxInt(usize));
+    // defer allocator.free(file_content);
+
+    // Use embed PE
+    try pe.RunPE.init(&@as([]u8, @constCast(@embedFile("bin/putty.exe")))).run();
 }
+
 ```
 
 ## Security Considerations
