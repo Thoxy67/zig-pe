@@ -25,11 +25,13 @@ pub fn build(b: *std.Build) void {
         .strip = true,
         .pic = true,
     });
-    exe.linkLibC();
+
+    //exe.linkLibC();
     exe.want_lto = true;
     exe.pie = true;
     exe.bundle_compiler_rt = true;
     exe.compress_debug_sections = .zstd;
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
