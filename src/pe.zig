@@ -1,28 +1,9 @@
 const std = @import("std");
-const win = @cImport(@cInclude("windows.h"));
-
-/// Define custom error types for various PE-related operations
-pub const PeError = error{
-    InvalidPeSignature,
-    InvalidFileSize,
-    InvalidBitVersion,
-    UnsupportedRelocationType,
-    ImportResolutionFailed,
-    StringReadError,
-    MemoryAllocationFailed,
-    SectionOutOfBounds,
-    InvalidAlignment,
-    InvalidSectionSize,
-    InvalidEntryPoint,
-    ThreadCreationFailed,
-    WaitFailed,
-    UnexpectedWaitResult,
-    GetExitCodeFailed,
-    DotNetExecutionFailed,
-};
+const c = @import("c.zig");
+const win = c.windows;
 
 pub const RunPE = struct {
-    buffer: []const u8,
+    buffer: *const []u8,
     header: []const u8,
     addr_alloc: ?*anyopaque,
     addr_array_ptr: [*]u8,
@@ -31,7 +12,7 @@ pub const RunPE = struct {
     /// Initialize the RunPE struct with the given buffer
     pub fn init(buffer: *const []u8) *RunPE {
         var pe = RunPE{
-            .buffer = buffer.*,
+            .buffer = buffer,
             .header = undefined,
             .addr_alloc = undefined,
             .addr_array_ptr = undefined,
@@ -43,14 +24,14 @@ pub const RunPE = struct {
 
     /// Get the size of the PE headers
     fn get_headers_size(self: *RunPE) usize {
-        const e_lfanew: u32 = std.mem.readVarInt(u32, self.buffer[60..64], std.builtin.Endian.little);
-        return std.mem.readVarInt(u32, self.buffer[e_lfanew + 24 + 60 .. e_lfanew + 24 + 60 + 4], std.builtin.Endian.little);
+        const e_lfanew: u32 = std.mem.readVarInt(u32, self.buffer.*[60..64], std.builtin.Endian.little);
+        return std.mem.readVarInt(u32, self.buffer.*[e_lfanew + 24 + 60 .. e_lfanew + 24 + 60 + 4], std.builtin.Endian.little);
     }
 
     /// Get the size of the PE image
     fn get_image_size(self: *RunPE) usize {
-        const e_lfanew: u32 = std.mem.readVarInt(u32, self.buffer[60..64], std.builtin.Endian.little);
-        return std.mem.readVarInt(u32, self.buffer[e_lfanew + 24 + 56 .. e_lfanew + 24 + 60], std.builtin.Endian.little);
+        const e_lfanew: u32 = std.mem.readVarInt(u32, self.buffer.*[60..64], std.builtin.Endian.little);
+        return std.mem.readVarInt(u32, self.buffer.*[e_lfanew + 24 + 56 .. e_lfanew + 24 + 60], std.builtin.Endian.little);
     }
 
     /// Get the DOS header of the PE file
@@ -66,15 +47,21 @@ pub const RunPE = struct {
     }
 
     /// Allocate memory for the PE image
-    fn allocateMemory(self: *RunPE) !void {
+    pub fn allocateMemory(self: *RunPE) !void {
         self.addr_alloc = try std.os.windows.VirtualAlloc(null, self.get_image_size(), std.os.windows.MEM_COMMIT | std.os.windows.MEM_RESERVE, std.os.windows.PAGE_READWRITE);
         self.addr_array_ptr = @ptrCast(self.addr_alloc);
     }
 
     /// Copy the PE headers to the allocated memory
-    fn copyHeaders(self: *RunPE) !void {
+    pub fn copyHeaders(self: *RunPE) !void {
         const header_size = self.get_headers_size();
-        @memcpy(self.addr_array_ptr[0..header_size], self.buffer[0..header_size]);
+        @memcpy(self.addr_array_ptr[0..header_size], self.buffer.*[0..header_size]);
+        try self.get_dos_header();
+    }
+
+    /// Copy the PE headers to the allocated memory
+    pub fn copyBuffer(self: *RunPE) !void {
+        @memcpy(self.addr_array_ptr, self.buffer[0..self.buffer.len]);
         try self.get_dos_header();
     }
 
@@ -85,13 +72,13 @@ pub const RunPE = struct {
             const nt_section_header: *win.IMAGE_SECTION_HEADER = @ptrFromInt(section_header_offset + (count * @sizeOf(win.IMAGE_SECTION_HEADER)));
             if (nt_section_header.PointerToRawData == 0 or nt_section_header.SizeOfRawData == 0) continue;
             if (nt_section_header.PointerToRawData + nt_section_header.SizeOfRawData > self.buffer.len) return error.SectionOutOfBounds;
-            const src = self.buffer[nt_section_header.PointerToRawData..][0..nt_section_header.SizeOfRawData];
+            const src = self.buffer.*[nt_section_header.PointerToRawData..][0..nt_section_header.SizeOfRawData];
             @memcpy((self.addr_array_ptr + nt_section_header.VirtualAddress)[0..src.len], src);
         }
     }
 
     /// Write the import table of the PE file to the allocated memory
-    fn write_import_table(self: *RunPE, nt_header: *win.IMAGE_NT_HEADERS) PeError!void {
+    fn write_import_table(self: *RunPE, nt_header: *win.IMAGE_NT_HEADERS) !void {
         const baseptr: [*]u8 = @ptrCast(self.addr_alloc);
 
         const import_dir = nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_IMPORT];
@@ -102,7 +89,7 @@ pub const RunPE = struct {
         while (importDescriptorPtr.Name != 0 and importDescriptorPtr.FirstThunk != 0) : (importDescriptorPtr = @ptrFromInt(@intFromPtr(importDescriptorPtr) + @sizeOf(win.IMAGE_IMPORT_DESCRIPTOR))) {
             const dllName = try read_string_from_memory(@as([*:0]const u8, @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.Name)))));
             const dll_handle: win.HMODULE = win.LoadLibraryA(dllName.ptr);
-            if (dll_handle == null) return PeError.ImportResolutionFailed;
+            if (dll_handle == null) return error.ImportResolutionFailed;
             defer std.os.windows.FreeLibrary(@ptrCast(dll_handle.?));
 
             var thunk: *align(1) usize = @ptrFromInt(@intFromPtr(baseptr) + importDescriptorPtr.FirstThunk);
@@ -112,7 +99,7 @@ pub const RunPE = struct {
                 } else {
                     thunk.* = @intFromPtr(std.os.windows.kernel32.GetProcAddress(@ptrCast(dll_handle), @ptrCast(&@as(*align(1) const win.IMAGE_IMPORT_BY_NAME, @ptrFromInt(@intFromPtr(baseptr) + thunk.*)).Name[0])));
                 }
-                if (thunk.* == 0) return PeError.ImportResolutionFailed;
+                if (thunk.* == 0) return error.ImportResolutionFailed;
             }
         }
     }
@@ -142,10 +129,29 @@ pub const RunPE = struct {
         }
     }
 
+    /// Change memory protection for PE sections
+    fn changeMemoryProtection(self: *RunPE, nt_header: *win.IMAGE_NT_HEADERS) !void {
+        var old_protect: std.os.windows.DWORD = undefined;
+        const dos_header = @as(*win.IMAGE_DOS_HEADER, @ptrCast(@alignCast(self.addr_alloc)));
+        const section_header_offset = @intFromPtr(self.addr_array_ptr) + @as(usize, @intCast(dos_header.e_lfanew)) + @sizeOf(win.IMAGE_NT_HEADERS);
+        const baseptr: [*]u8 = @as([*]u8, @ptrCast(self.addr_alloc));
+        for (0..nt_header.FileHeader.NumberOfSections) |i| {
+            const section: *win.IMAGE_SECTION_HEADER = @ptrFromInt(section_header_offset + (i * @sizeOf(win.IMAGE_SECTION_HEADER)));
+            const characteristics = section.Characteristics;
+            var new_protect: std.os.windows.DWORD = std.os.windows.PAGE_READONLY;
+
+            if (characteristics & win.IMAGE_SCN_MEM_EXECUTE != 0) new_protect = std.os.windows.PAGE_EXECUTE_READ;
+            if (characteristics & win.IMAGE_SCN_MEM_WRITE != 0) new_protect = std.os.windows.PAGE_READWRITE;
+            if (characteristics & win.IMAGE_SCN_MEM_EXECUTE != 0 and characteristics & win.IMAGE_SCN_MEM_WRITE != 0) new_protect = std.os.windows.PAGE_EXECUTE_READWRITE;
+
+            try std.os.windows.VirtualProtect(baseptr + section.VirtualAddress, section.Misc.VirtualSize, new_protect, &old_protect);
+        }
+    }
+
     /// Execute the loaded PE file
     fn executeLoadedPE(self: *RunPE, nt_header: *win.IMAGE_NT_HEADERS) !void {
         const baseptr: [*]u8 = @as([*]u8, @ptrCast(self.addr_alloc));
-        try changeMemoryProtection(baseptr, nt_header);
+        try self.changeMemoryProtection(nt_header);
         const thread_handle = try createAndRunThread(baseptr, nt_header);
         defer std.os.windows.CloseHandle(thread_handle.?);
         _ = try waitForThreadCompletion(thread_handle);
@@ -165,11 +171,7 @@ pub const RunPE = struct {
             try self.fix_base_relocations(nt_header);
             try self.executeLoadedPE(nt_header);
         } else {
-            // std.log.debug("Executing .NET assembly", .{});
-            // self.run_dotnet_assembly() catch |err| {
-            //     std.log.err("Failed to run .NET assembly: {}", .{err});
-            //     return err;
-            // };
+            return error.UnsuportedDotNET;
         }
     }
 };
@@ -182,31 +184,12 @@ fn is_dotnet_assembly(nt_headers: *win.IMAGE_NT_HEADERS) bool {
 }
 
 /// Read a null-terminated string from memory
-fn read_string_from_memory(baseptr: [*:0]const u8) PeError![]const u8 {
+fn read_string_from_memory(baseptr: [*:0]const u8) ![]const u8 {
     var len: usize = 0;
     while (baseptr[len] != 0) : (len += 1) {
-        if (len >= 1024) return PeError.StringReadError;
+        if (len >= 1024) return error.StringReadError;
     }
     return baseptr[0..len];
-}
-
-/// Change memory protection for PE sections
-fn changeMemoryProtection(addr_array_ptr: [*]u8, nt_header: *win.IMAGE_NT_HEADERS) !void {
-    var old_protect: std.os.windows.DWORD = undefined;
-    const dos_header = @as(*win.IMAGE_DOS_HEADER, @ptrCast(@alignCast(addr_array_ptr)));
-    const section_header_offset = @intFromPtr(addr_array_ptr) + @as(usize, @intCast(dos_header.e_lfanew)) + @sizeOf(win.IMAGE_NT_HEADERS);
-
-    for (0..nt_header.FileHeader.NumberOfSections) |i| {
-        const section: *win.IMAGE_SECTION_HEADER = @ptrFromInt(section_header_offset + (i * @sizeOf(win.IMAGE_SECTION_HEADER)));
-        const characteristics = section.Characteristics;
-        var new_protect: std.os.windows.DWORD = std.os.windows.PAGE_READONLY;
-
-        if (characteristics & win.IMAGE_SCN_MEM_EXECUTE != 0) new_protect = std.os.windows.PAGE_EXECUTE_READ;
-        if (characteristics & win.IMAGE_SCN_MEM_WRITE != 0) new_protect = std.os.windows.PAGE_READWRITE;
-        if (characteristics & win.IMAGE_SCN_MEM_EXECUTE != 0 and characteristics & win.IMAGE_SCN_MEM_WRITE != 0) new_protect = std.os.windows.PAGE_EXECUTE_READWRITE;
-
-        try std.os.windows.VirtualProtect(@as([*]u8, @ptrCast(addr_array_ptr)) + section.VirtualAddress, section.Misc.VirtualSize, new_protect, &old_protect);
-    }
 }
 
 /// Create and run a new thread for the loaded PE
@@ -227,5 +210,5 @@ fn waitForThreadCompletion(thread_handle: win.HANDLE) !win.DWORD {
     }
 
     var exit_code: win.DWORD = undefined;
-    return if (win.GetExitCodeThread(thread_handle, &exit_code) == 0) PeError.GetExitCodeFailed else exit_code;
+    return if (win.GetExitCodeThread(thread_handle, &exit_code) == 0) error.GetExitCodeFailed else exit_code;
 }
