@@ -1,6 +1,5 @@
 const std = @import("std");
-const c = @import("c.zig");
-const win = c.windows;
+const win = @cImport(@cInclude("windows.h"));
 
 pub const RunPE = struct {
     buffer: *const []u8,
