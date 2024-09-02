@@ -12,5 +12,5 @@ pub fn main() !void {
     // defer allocator.free(file_content);
 
     // Use embed PE
-    try pe.RunPE.init(&@as([]u8, @constCast(@embedFile("bin/putty.exe")))).run();
+    try pe.RunPE.init(@embedFile("bin/putty.exe")).run();
 }
