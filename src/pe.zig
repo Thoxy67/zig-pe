@@ -2,17 +2,15 @@ const std = @import("std");
 const win = @cImport(@cInclude("windows.h"));
 
 pub const RunPE = struct {
-    buffer: *const []u8,
-    header: []const u8,
+    buffer: []const u8,
     addr_alloc: ?*anyopaque,
     addr_array_ptr: [*]u8,
     dosheader: *win.IMAGE_DOS_HEADER,
 
     /// Initialize the RunPE struct with the given buffer
-    pub fn init(buffer: *const []u8) *RunPE {
+    pub fn init(buffer: []const u8) *RunPE {
         var pe = RunPE{
             .buffer = buffer,
-            .header = undefined,
             .addr_alloc = undefined,
             .addr_array_ptr = undefined,
             .dosheader = undefined,
@@ -23,14 +21,14 @@ pub const RunPE = struct {
 
     /// Get the size of the PE headers
     fn get_headers_size(self: *RunPE) usize {
-        const e_lfanew: u32 = std.mem.readVarInt(u32, self.buffer.*[60..64], std.builtin.Endian.little);
-        return std.mem.readVarInt(u32, self.buffer.*[e_lfanew + 24 + 60 .. e_lfanew + 24 + 60 + 4], std.builtin.Endian.little);
+        const e_lfanew: u32 = std.mem.readVarInt(u32, self.buffer[60..64], std.builtin.Endian.little);
+        return std.mem.readVarInt(u32, self.buffer[e_lfanew + 24 + 60 .. e_lfanew + 24 + 60 + 4], std.builtin.Endian.little);
     }
 
     /// Get the size of the PE image
     fn get_image_size(self: *RunPE) usize {
-        const e_lfanew: u32 = std.mem.readVarInt(u32, self.buffer.*[60..64], std.builtin.Endian.little);
-        return std.mem.readVarInt(u32, self.buffer.*[e_lfanew + 24 + 56 .. e_lfanew + 24 + 60], std.builtin.Endian.little);
+        const e_lfanew: u32 = std.mem.readVarInt(u32, self.buffer[60..64], std.builtin.Endian.little);
+        return std.mem.readVarInt(u32, self.buffer[e_lfanew + 24 + 56 .. e_lfanew + 24 + 60], std.builtin.Endian.little);
     }
 
     /// Get the DOS header of the PE file
@@ -54,13 +52,7 @@ pub const RunPE = struct {
     /// Copy the PE headers to the allocated memory
     pub fn copyHeaders(self: *RunPE) !void {
         const header_size = self.get_headers_size();
-        @memcpy(self.addr_array_ptr[0..header_size], self.buffer.*[0..header_size]);
-        try self.get_dos_header();
-    }
-
-    /// Copy the PE headers to the allocated memory
-    pub fn copyBuffer(self: *RunPE) !void {
-        @memcpy(self.addr_array_ptr, self.buffer[0..self.buffer.len]);
+        @memcpy(self.addr_array_ptr[0..header_size], self.buffer[0..header_size]);
         try self.get_dos_header();
     }
 
@@ -71,7 +63,7 @@ pub const RunPE = struct {
             const nt_section_header: *win.IMAGE_SECTION_HEADER = @ptrFromInt(section_header_offset + (count * @sizeOf(win.IMAGE_SECTION_HEADER)));
             if (nt_section_header.PointerToRawData == 0 or nt_section_header.SizeOfRawData == 0) continue;
             if (nt_section_header.PointerToRawData + nt_section_header.SizeOfRawData > self.buffer.len) return error.SectionOutOfBounds;
-            const src = self.buffer.*[nt_section_header.PointerToRawData..][0..nt_section_header.SizeOfRawData];
+            const src = self.buffer[nt_section_header.PointerToRawData..][0..nt_section_header.SizeOfRawData];
             @memcpy((self.addr_array_ptr + nt_section_header.VirtualAddress)[0..src.len], src);
         }
     }
@@ -86,18 +78,17 @@ pub const RunPE = struct {
         var importDescriptorPtr: *win.IMAGE_IMPORT_DESCRIPTOR = @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(import_dir.VirtualAddress)));
 
         while (importDescriptorPtr.Name != 0 and importDescriptorPtr.FirstThunk != 0) : (importDescriptorPtr = @ptrFromInt(@intFromPtr(importDescriptorPtr) + @sizeOf(win.IMAGE_IMPORT_DESCRIPTOR))) {
-            const dllName = try read_string_from_memory(@as([*:0]const u8, @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.Name)))));
-            const dll_handle: win.HMODULE = win.LoadLibraryA(dllName.ptr);
-            if (dll_handle == null) return error.ImportResolutionFailed;
+            const dllName = std.mem.sliceTo(@as([*:0]const u8, @ptrFromInt(@intFromPtr(baseptr) + @as(usize, @intCast(importDescriptorPtr.Name)))), 0);
+            const dll_handle: win.HMODULE = win.LoadLibraryA(dllName.ptr) orelse return error.ImportResolutionFailed;
             defer std.os.windows.FreeLibrary(@ptrCast(dll_handle.?));
 
             var thunk: *align(1) usize = @ptrFromInt(@intFromPtr(baseptr) + importDescriptorPtr.FirstThunk);
             while (thunk.* != 0) : (thunk = @ptrFromInt(@intFromPtr(thunk) + @sizeOf(usize))) {
-                if (thunk.* & (1 << 63) != 0) {
-                    thunk.* = @intFromPtr(std.os.windows.kernel32.GetProcAddress(@ptrCast(dll_handle), @ptrFromInt(@as(usize, @as(u16, @truncate(thunk.* & 0xFFFF))))));
-                } else {
-                    thunk.* = @intFromPtr(std.os.windows.kernel32.GetProcAddress(@ptrCast(dll_handle), @ptrCast(&@as(*align(1) const win.IMAGE_IMPORT_BY_NAME, @ptrFromInt(@intFromPtr(baseptr) + thunk.*)).Name[0])));
-                }
+                thunk.* = if (thunk.* & (1 << 63) != 0)
+                    @intFromPtr(std.os.windows.kernel32.GetProcAddress(@ptrCast(dll_handle), @ptrFromInt(@as(usize, @as(u16, @truncate(thunk.* & 0xFFFF))))))
+                else
+                    @intFromPtr(std.os.windows.kernel32.GetProcAddress(@ptrCast(dll_handle), @ptrCast(&@as(*align(1) const win.IMAGE_IMPORT_BY_NAME, @ptrFromInt(@intFromPtr(baseptr) + thunk.*)).Name[0])));
+
                 if (thunk.* == 0) return error.ImportResolutionFailed;
             }
         }
@@ -105,11 +96,11 @@ pub const RunPE = struct {
 
     /// Fix PE base relocations
     fn fix_base_relocations(self: *RunPE, nt_header: *win.IMAGE_NT_HEADERS) !void {
-        const baseptr: [*]u8 = @ptrCast(self.addr_alloc);
         const delta = @intFromPtr(self.addr_alloc) - nt_header.OptionalHeader.ImageBase;
-
         const reloc_dir = &nt_header.OptionalHeader.DataDirectory[win.IMAGE_DIRECTORY_ENTRY_BASERELOC];
         if (reloc_dir.Size == 0) return;
+
+        const baseptr: [*]u8 = @ptrCast(self.addr_alloc);
 
         var reloc_block: *win.IMAGE_BASE_RELOCATION = @ptrCast(@alignCast(baseptr + reloc_dir.VirtualAddress));
 
@@ -120,7 +111,7 @@ pub const RunPE = struct {
 
                 switch (t) {
                     win.IMAGE_REL_BASED_HIGHLOW => @as(*u32, @ptrCast(@alignCast(baseptr + reloc_block.VirtualAddress + offset))).* +%= @truncate(delta),
-                    win.IMAGE_REL_BASED_DIR64 => @as(*u64, @ptrCast(@alignCast(baseptr + reloc_block.VirtualAddress + offset))).* +%= @as(u64, @bitCast(delta)),
+                    win.IMAGE_REL_BASED_DIR64 => @as(*usize, @ptrCast(@alignCast(baseptr + reloc_block.VirtualAddress + offset))).* +%= @as(usize, @bitCast(delta)),
                     win.IMAGE_REL_BASED_ABSOLUTE => {},
                     else => return error.UnsupportedRelocationType,
                 }
@@ -151,6 +142,7 @@ pub const RunPE = struct {
     fn executeLoadedPE(self: *RunPE, nt_header: *win.IMAGE_NT_HEADERS) !void {
         const baseptr: [*]u8 = @as([*]u8, @ptrCast(self.addr_alloc));
         try self.changeMemoryProtection(nt_header);
+
         const thread_handle = try createAndRunThread(baseptr, nt_header);
         defer std.os.windows.CloseHandle(thread_handle.?);
         _ = try waitForThreadCompletion(thread_handle);
@@ -182,15 +174,6 @@ fn is_dotnet_assembly(nt_headers: *win.IMAGE_NT_HEADERS) bool {
     return data_directory.VirtualAddress != 0 and data_directory.Size != 0;
 }
 
-/// Read a null-terminated string from memory
-fn read_string_from_memory(baseptr: [*:0]const u8) ![]const u8 {
-    var len: usize = 0;
-    while (baseptr[len] != 0) : (len += 1) {
-        if (len >= 1024) return error.StringReadError;
-    }
-    return baseptr[0..len];
-}
-
 /// Create and run a new thread for the loaded PE
 fn createAndRunThread(addr_array_ptr: [*]u8, nt_header: *win.IMAGE_NT_HEADERS) !win.HANDLE {
     const thread_handle = std.os.windows.kernel32.CreateThread(null, 0, @as(std.os.windows.LPTHREAD_START_ROUTINE, @ptrCast(@alignCast(@as(*const fn () callconv(.C) void, @ptrFromInt(@intFromPtr(addr_array_ptr) + nt_header.OptionalHeader.AddressOfEntryPoint))))), null, 0, null);
@@ -200,11 +183,11 @@ fn createAndRunThread(addr_array_ptr: [*]u8, nt_header: *win.IMAGE_NT_HEADERS) !
 
 /// Wait for the created thread to complete execution
 fn waitForThreadCompletion(thread_handle: win.HANDLE) !win.DWORD {
-    const wait_result = win.WaitForSingleObject(thread_handle.?, std.os.windows.INFINITE);
+    const wait_result = std.os.windows.kernel32.WaitForSingleObject(thread_handle.?, std.os.windows.INFINITE);
     switch (wait_result) {
-        win.WAIT_OBJECT_0 => {},
-        win.WAIT_TIMEOUT => {},
-        win.WAIT_FAILED => return error.WaitFailed,
+        std.os.windows.WAIT_OBJECT_0 => {},
+        std.os.windows.WAIT_TIMEOUT => {},
+        std.os.windows.WAIT_FAILED => return error.WaitFailed,
         else => return error.UnexpectedWaitResult,
     }
 
