@@ -8,7 +8,13 @@ pub fn build(b: *std.Build) void {
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
     // for restricting supported target set are available.
-    const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{
+        .default_target = .{
+            .os_tag = .windows,
+            .abi = .gnu,
+            // .cpu_arch = .x86,
+        },
+    });
 
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
@@ -21,7 +27,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .link_libc = true,
-        .single_threaded = true,
         .strip = true,
         .pic = true,
     });
@@ -31,6 +36,8 @@ pub fn build(b: *std.Build) void {
     exe.pie = true;
     exe.bundle_compiler_rt = true;
     exe.compress_debug_sections = .zstd;
+    exe.link_data_sections = true;
+    exe.subsystem = .Windows;
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

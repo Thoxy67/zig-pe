@@ -10,6 +10,7 @@ pub fn main() !void {
     // const file_name = "src/bin/putty.exe";
     // const file_content = try std.fs.cwd().readFileAlloc(allocator, file_name, std.math.maxInt(usize));
     // defer allocator.free(file_content);
+    // try pe.RunPE.init(file_content).run();
 
     // Use embed PE
     try pe.RunPE.init(@embedFile("bin/putty.exe")).run();
