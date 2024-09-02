@@ -17,6 +17,7 @@ This project implements a RunPE loader in Zig, allowing for the dynamic loading 
 - [x] Write sections to header
 - [x] Handle import table (load required DLLs and resolve functions)
 - [x] Fix base relocations
+- [x] Change Memory Protection
 - [x] Execute the PE file's entry point
 
 ## Compatibility
@@ -61,7 +62,7 @@ pub fn main() !void {
     // defer allocator.free(file_content);
 
     // Use embed PE
-    try pe.RunPE.init(&@as([]u8, @constCast(@embedFile("bin/putty.exe")))).run();
+    try pe.RunPE.init(@embedFile("bin/putty.exe")).run();
 }
 
 ```
