@@ -1,6 +1,6 @@
 const std = @import("std");
 const utils = @import("utils.zig");
-const win = @cImport(@cInclude("windows.h"));
+const win = @cImport(@cInclude("win32.h"));
 
 // ============================================================================
 // COM / CLR type definitions
@@ -361,11 +361,30 @@ pub fn executeDotNetAssembly(buffer: []const u8, args: []const []const u8) !void
         return error.GetEntryPointFailed;
     }
 
+    // --- Detect entry point parameter count ---
+    var params_info: ?*SAFEARRAY = null;
+    const get_parameters = vtblSlot(*const fn (
+        *anyopaque,
+        *?*SAFEARRAY,
+    ) callconv(.c) HRESULT, method_info.?, 18);
+    const hr_gp = get_parameters(method_info.?, &params_info);
+    const has_params = if (hr_gp >= 0) blk: {
+        if (params_info) |pi| {
+            const count = pi.rgsabound[0].c_elements;
+            _ = sa_destroy(pi);
+            break :blk count > 0;
+        }
+        break :blk false;
+    } else true; // default to assuming parameters for backwards compat
+
     // --- Invoke entry point ---
     const obj = empty_variant;
     var ret_val = empty_variant;
 
-    const params_sa = createArgsSafeArray(args, sa_create, sa_access, sa_unaccess, sys_alloc);
+    const params_sa = if (has_params)
+        createArgsSafeArray(args, sa_create, sa_access, sa_unaccess, sys_alloc)
+    else
+        null;
 
     // _MethodInfo::Invoke_3 (slot 37)
     const invoke_3 = vtblSlot(*const fn (

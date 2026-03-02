@@ -1,7 +1,6 @@
 const std = @import("std");
-const win = @cImport(@cInclude("windows.h"));
+const win = @cImport(@cInclude("win32.h"));
 const pe = @import("pe.zig");
-const builtin = @import("builtin");
 
 /// Check if the PE file is a .NET assembly by inspecting the CLR data directory
 pub fn is_dotnet_assembly(ntheaders: pe.NtHeaders) bool {
